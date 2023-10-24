@@ -4,9 +4,10 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-// MQTT setup
+// WiFi setup
 const char* ssid = "ssid";
 const char* password = "password";
+// MQTT setup
 const char* mqtt_server = "mqtt_server";
 const char* mqttUser = "mqttUser";
 const char* mqttPassword = "mqttPassword";
@@ -57,7 +58,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
-  for (int i = 0; i < length; i++) {
+  for (unsigned int i = 0; i < length; i++) {
     Serial.print((char)payload[i]);
   }
   Serial.println();
