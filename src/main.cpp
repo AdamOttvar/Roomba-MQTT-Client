@@ -1,25 +1,13 @@
 #include <Arduino.h>
-#include <RoombaCommunication.h>
 #include <ESP8266WiFi.h>
-#include <PubSubClient.h>
-#include <ArduinoJson.h>
+#include <ESP8266WebServer.h>
+#include <RoombaCommunication.h>
 
-// WiFi setup
-const char* ssid = "ssid";
-const char* password = "password";
-// MQTT setup
-const char* mqtt_server = "mqtt_server";
-const char* mqttUser = "mqttUser";
-const char* mqttPassword = "mqttPassword";
 
-WiFiClient espClient;
-PubSubClient client(espClient);
-unsigned long lastMsg = 0;
-#define MSG_BUFFER_SIZE  (50)
-char msg[MSG_BUFFER_SIZE];
-int value = 0;
-const int capacity=JSON_OBJECT_SIZE(3)+2*JSON_OBJECT_SIZE(1);
-StaticJsonDocument<capacity> JSONpayload;
+const char *ssid = "RobotControllerAP";
+const char *password = "password";
+
+ESP8266WebServer server(80);
 
 #define SERIAL_RX     D5  // pin for SoftwareSerial RX
 #define SERIAL_TX     D6  // pin for SoftwareSerial TX
@@ -28,114 +16,68 @@ long baudRate = 115200;
 RoombaCommunication roomba(SERIAL_RX, SERIAL_TX, WAKE_PIN, baudRate);
 
 int DEFAULT_SPEED = 50;
-//--------------------------------------------------------------------------
 
-void setup_wifi() {
-
-  delay(10);
-  // We start by connecting to a WiFi network
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  randomSeed(micros());
-
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
+void handleRoot() {
+  server.send(200, "text/html", "<html><body>"
+                                "<h1>Robot Control</h1>"
+                                "<form action='/move' method='get'>"
+                                "<button name='direction' value='forward'>Forward</button>"
+                                "<button name='direction' value='backward'>Backward</button>"
+                                "<button name='direction' value='left'>Left</button>"
+                                "<button name='direction' value='right'>Right</button>"
+                                "<button name='command' value='wakeup'>Wake Up</button>"
+                                "<button name='command' value='dock'>Dock</button>"
+                                "</form>"
+                                "</body></html>");
 }
 
-void callback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (unsigned int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
-  DeserializationError error = deserializeJson(JSONpayload, payload);
-  if (error) {
-    Serial.print(F("deserializeJson() failed: "));
-    Serial.println(error.f_str());
-  }
-  else if (strcmp(topic,"/homeassistant/roomba/wakeup")==0) {
+void handleMove() {
+  String direction = server.arg("direction");
+  String command = server.arg("command");
+
+  if (direction == "forward") {
+    Serial.println("Moving Forward");
+    roomba.driveDirect(DEFAULT_SPEED, DEFAULT_SPEED);
+  } else if (direction == "backward") {
+    Serial.println("Moving Backward");
+    roomba.driveDirect(-DEFAULT_SPEED, -DEFAULT_SPEED);
+  } else if (direction == "left") {
+    Serial.println("Moving Left");
+    roomba.driveDirect(-DEFAULT_SPEED, DEFAULT_SPEED);
+  } else if (direction == "right") {
+    Serial.println("Moving right");
+    roomba.driveDirect(DEFAULT_SPEED, -DEFAULT_SPEED);
+  } else if (command == "wakeup") {
+    Serial.println("Moving wakeup");
     roomba.wakeUp();
-  }
-  else if (strcmp(topic,"/homeassistant/roomba/dock")==0) {
+  } else if (command == "dock") {
+    Serial.println("Moving dock");
     roomba.seekDock();
   }
-  else if (strcmp(topic,"/homeassistant/roomba/rotate")==0) {
-    int input_speed = JSONpayload["data"];
-    Serial.println("Data:");
-    Serial.println(input_speed);
-    roomba.driveDirect(input_speed, -input_speed);
-  }
-  else if (strcmp(topic,"/homeassistant/roomba/forward")==0) {
-    int input_speed = JSONpayload["data"];
-    Serial.println("Data:");
-    Serial.println(input_speed);
-    roomba.driveDirect(input_speed, input_speed);
-  }
-  else if (strcmp(topic,"/homeassistant/roomba/backward")==0) {
-    int input_speed = JSONpayload["data"];
-    Serial.println("Data:");
-    Serial.println(input_speed);
-    roomba.driveDirect(-input_speed, -input_speed);
-  }
-  else if (strcmp(topic,"/homeassistant/roomba/stop")==0) {
-    roomba.driveStop();
-  }
+
+  server.send(200, "text/plain", "OK");
 }
 
-void reconnect() {
-  // Loop until we're reconnected
-  while (!client.connected()) {
-    Serial.print("Attempting MQTT connection...");
-    // Create a random client ID
-    String clientId = "ESP8266Client-";
-    clientId += String(random(0xffff), HEX);
-    // Attempt to connect
-    if (client.connect(clientId.c_str(),mqttUser,mqttPassword)) {
-      Serial.println("connected");
-      // ... and resubscribe
-      client.subscribe("/homeassistant/roomba/+");
-    } else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
-      delay(5000);
-    }
-  }
-}
 
-//--------------------------------------------------------------------------
-
-void setup()
-{ 
+void setup() {
   Serial.begin(115200);
-  pinMode(WAKE_PIN, OUTPUT);
-  pinMode(SERIAL_RX, INPUT);
-  pinMode(SERIAL_TX, OUTPUT);
-  setup_wifi();
-  client.setServer(mqtt_server, 1883);
-  client.setCallback(callback);
+
+  // Set up Access Point
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, password);
+  
+  // Print the IP address
+  Serial.println();
+  Serial.print("Access Point IP Address: ");
+  Serial.println(WiFi.softAPIP());
+
+  // Serve the web page
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/move", HTTP_GET, handleMove);
+  
+  server.begin();
 }
 
-void loop()
-{
-  if (!client.connected()) {
-    reconnect();
-  }
-  client.loop();
-  delay(1);
+void loop() {
+  server.handleClient();
 }
